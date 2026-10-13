@@ -123,18 +123,57 @@ and test sets are only transformed, which prevents leakage. The result is 132
 input columns, and the fitted pipeline is saved so the Gradio app applies the
 same transformation.
 
-## Modeling: three implementations, one model
+## 4. Modeling: three implementations, one model
 
-*Which model (linear or logistic regression) and why. A results table
-comparing scikit-learn, the manual PyTorch loop, and the standard
-torch.nn.Module/torch.optim workflow, on the same test set, against the
-naive baseline. Do the three agree? If not, why not?*
+### 4.1 Model Choice
 
-## Limitations & next steps
+Since the target is a continuous nightly price, we use **linear regression (with L2 regularisation, i.e. Ridge)** rather than logistic regression, which is meant for categorical outcomes. 
 
-*Real limitations you found, and concretely how you'd address each one with
-more time or data — not generic hedging.*
+The target is modelled as log1p(price) to reduce its right skew (1.70 → −0.30), and the top 1% of prices (> €792) were removed before splitting into 70/15/15 train/validation/test sets.
 
-## Generative AI use disclosure
+### 4.2 Results against the naive baseline
+The baseline predicts the training median for every listing (log1p = 5.05, about €155/night)
 
-*Per the syllabus AI Policy: what you used and how, or "no AI content used."*
+All three implementations improve substantially on it: 
+- Scikit-learn Ridge reaches an **R² of 0.607 (RMSE €86.1, MAE €53.2)**
+- The manual PyTorch loop **0.527 (RMSE €90.8, MAE €57.1)**
+- The nn.Linear/Adam model **0.516 (RMSE €89.8, MAE €57.4).**
+
+All three models beat the baseline clearly.
+
+### 4.3 Do they agree between eachother?
+The three implementations fit the same linear model, so they largely agree, but they do not match exactly.
+
+**Scikit-learn solves the least-squares problem in closed form**, whereas the two PyTorch versions use gradient descent for a fixed 500 epochs and do not fully converge (their validation loss remains above Ridge’s, and the best learning rate sits at the edge of the grid searched). 
+
+The small gap, about 0.04 in log-RMSE, therefore reflects optimisation rather than any difference in model. The two PyTorch variants are statistically indistinguishable from one another.
+
+### 4.3 What was tuned, and how?
+Hyperparameters were tuned on the validation set only. The test set was kept for the final comparison, which is the correct protocol. **Only one hyperparameter per model was tuned.**
+
+- **Ridge**: I tried 5 values and picked α = 1. It made almost no difference, because I have plenty of data. (α ∈ {0.01, 0.1, 1, 10, 100}).
+- **PyTorch**: I tried 4 values, and both methods preferred the biggest, 0.1. (learning rate over {0.001, 0.01, 0.05, 0.1} for 300 epochs each)
+
+## 5. Limitations & next steps
+
+### 5.1 Limitations
+I found the following limitations on the work:
+1. **The model is too simple**. It treats every feature on its own, but in real life features work together. A central location matters more for a whole flat than for a room.
+2. **Two of the models didn’t finish learning**. The PyTorch models were stopped too early, so they are a bit less accurate than scikit-learn.
+3. **Amenities were just counted**. A pool and a hairdryer counted the same, even though a pool affects the price far more.
+4. **The model doesn’t cover everything**. For example very expensive listings (over €792 per night) were removed and brand-new listings with no recent reviews were left out.
+5. **Euro predictions are slightly too low**. We predicted on a log scale and converted back, which causes a small bias.
+6. **Preparing data mistakes** Some calculations used all the data before it was split, so the test set leaked a little into training.
+
+### 5.2 Next Steps
+1. **Train the PyTorch models longer and with bigger step**s, until they match scikit-learn.
+2. **Use amenities properly**, with a yes/no column for important ones like pool, air conditioning, lift and terrace.
+3. **Cover the whole market: test on expensive listings too**, and build a second model for new listings without reviews.
+4. **Fix the data preparation**. Do all calculations on the training data only, and find out why some values were missing.
+5. **Test more than once**, using several data splits and data from different months.
+6. **Correct the euro conversion**, or report percentage errors instead.
+
+## 6. Generative AI use disclosure
+
+Generative AI (Claude Code) was used to assist with coding, and refining content. All AI-assisted content was reviewed and edited for accuracy and consistency with my own understanding.
+
